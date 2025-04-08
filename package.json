@@ -1,33 +1,25 @@
 {
-  "name": "code-profiler",
-  "displayName": "code_profiler",
-  "description": "Real Time System Resources monitor for the executing program",
+  "name": "universal-profiler",
+  "displayName": "Universal Profiler",
+  "description": "Auto-detect program type and profile CPU/Memory/Network usage per function.",
   "version": "0.0.1",
   "engines": {
-    "vscode": "^1.98.0"
+    "vscode": "^1.70.0"
   },
-  "categories": [
-    "Other"
+  "activationEvents": [
+    "onCommand:extension.runProfiler"
   ],
-  "activationEvents": [],
-  "main": "./extension.js",
+  "main": "extension.js",
   "contributes": {
-    "commands": [{
-      "command": "code-profiler.helloWorld",
-      "title": "Hello World"
-    }]
+    "commands": [
+      {
+        "command": "extension.runProfiler",
+        "title": "Run Universal Profiler"
+      }
+    ]
   },
   "scripts": {
-    "lint": "eslint .",
-    "pretest": "npm run lint",
-    "test": "vscode-test"
+    "postinstall": "pip install -r profiler/requirements.txt"
   },
-  "devDependencies": {
-    "@types/vscode": "^1.98.0",
-    "@types/mocha": "^10.0.10",
-    "@types/node": "20.x",
-    "eslint": "^9.23.0",
-    "@vscode/test-cli": "^0.0.10",
-    "@vscode/test-electron": "^2.4.1"
-  }
+  "dependencies": {}
 }
