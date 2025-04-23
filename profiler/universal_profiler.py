@@ -15,9 +15,8 @@ class FunctionProfiler:
         self.call_stack = []
         self.lock = threading.Lock()
         self.stop_event = threading.Event()
-        self.sample_interval = 0.05  # 50ms
+        self.sample_interval = 1.0  # 1 second intervals for better CPU accuracy
         self.per_second_log = []
-        self.last_second_logged = None
         self.call_counts = defaultdict(int)
         
         # Print a special marker to indicate the start of JSON data
@@ -30,49 +29,39 @@ class FunctionProfiler:
         self.process.cpu_percent(interval=None)
 
         while not self.stop_event.is_set():
-            if not self.process.is_running():
-                break
-
-            timestamp = time.time()
-            cpu = self.process.cpu_percent() 
-            mem = self.process.memory_info().rss / (1024 * 1024)  # in MB
-
-            current_second = int(timestamp)
-            if current_second != self.last_second_logged:
-                with self.lock:
-                    active_funcs = [f.split(':')[1] for f in self.call_stack] if self.call_stack else ['<main>']
-                    log_entry = {
-                        'type': 'realtimeUpdate',
-                        'data': {
-                            'timestamp': datetime.fromtimestamp(timestamp).strftime('%H:%M:%S'),
-                            'cpu': cpu,
-                            'mem': mem,
-                            'functions': ", ".join(active_funcs) or "<main>"
-                        }
-                    }
-                    self.per_second_log.append(log_entry['data'])
-                    self.last_second_logged = current_second
-
-                    print("DEBUG: Sending data:", json.dumps(log_entry))  # Add this
-
-                    # Output as JSON for the extension to parse
-                    print(json.dumps(log_entry))
-                    sys.stdout.flush()
+            start_time = time.time()
+            cpu = self.process.cpu_percent(interval=self.sample_interval)
+            mem = self.process.memory_info().rss / (1024 * 1024)  # MB
+            current_time = time.time()
 
             with self.lock:
-                for func_info in self.call_stack:
-                    self.function_stats[func_info].append((timestamp, cpu, mem))
+                active_funcs = list(set(self.call_stack)) if self.call_stack else ['<main>']
+                for func_id in active_funcs:
+                    self.function_stats[func_id].append((current_time, cpu, mem))
 
-            time.sleep(self.sample_interval)
+                log_entry = {
+                    'timestamp': datetime.fromtimestamp(current_time).strftime('%H:%M:%S'),
+                    'cpu': cpu,
+                    'mem': mem,
+                    'active_functions': active_funcs
+                }
+                self.per_second_log.append(log_entry)
+
+                print("{:<10} {:<8.1f} {:<10.1f} {:<50}".format(
+                    log_entry['timestamp'], 
+                    log_entry['cpu'], 
+                    log_entry['mem'], 
+                    ", ".join(log_entry['active_functions'])
+                ))
 
     def function_enter(self, frame):
         filename = os.path.abspath(frame.f_code.co_filename)
         if not filename.startswith(self.target_script):
-            return  # Skip system/library calls
+            return
 
         func_name = frame.f_code.co_name
         if func_name == '<module>':
-            return  # Skip module-level code
+            return
 
         lineno = frame.f_lineno
         func_id = f"{os.path.basename(filename)}:{func_name}:{lineno}"
@@ -95,7 +84,9 @@ class FunctionProfiler:
 
         with self.lock:
             if func_id in self.call_stack:
+                self.call_stack.reverse()
                 self.call_stack.remove(func_id)
+                self.call_stack.reverse()
 
     def get_aggregated_stats(self):
         aggregated = defaultdict(lambda: {
@@ -163,9 +154,21 @@ def profile_script(script_path):
     finally:
         sys.settrace(None)
         profiler.stop_event.set()
-        monitor_thread.join()
+        monitor_thread.join(timeout=2.0)
 
-    # Send final data
+    print("\n[+] Per-Second Resource Usage:")
+    print("{:<10} {:<8} {:<10} {:<50}".format("Time", "CPU%", "Mem(MB)", "Active Functions"))
+    for entry in profiler.per_second_log:
+        print("{:<10} {:<8.1f} {:<10.1f} {:<50}".format(
+            entry['timestamp'], entry['cpu'], entry['mem'], 
+            ", ".join(entry['active_functions'])
+        ))
+
+    print("\n[+] Function Statistics:")
+    print("{:<35} {:<8} {:<12} {:<10} {:<10} {:<10} {:<10}".format(
+        "Function", "Calls", "Total Time", "Avg CPU%", "Max CPU%", "Avg Mem", "Max Mem"
+    ))
+
     stats = profiler.get_aggregated_stats()
     final_data = {
         'type': 'profilerData',
@@ -191,7 +194,7 @@ def profile_script(script_path):
     
 if __name__ == "__main__":
     if len(sys.argv) != 2:
-        print("Usage: python universal_profiler.py <your_script.py>")
+        print("Usage: python profiler.py <your_script.py>")
         sys.exit(1)
 
     if not os.path.exists(sys.argv[1]):
