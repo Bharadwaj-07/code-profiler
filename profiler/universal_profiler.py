@@ -3,6 +3,7 @@ import sys
 import time
 import threading
 import psutil
+import json
 from collections import defaultdict
 from datetime import datetime
 
@@ -18,10 +19,15 @@ class FunctionProfiler:
         self.per_second_log = []
         self.last_second_logged = None
         self.call_counts = defaultdict(int)
+        
+        # Print a special marker to indicate the start of JSON data
+        print("\n@@@PROFILER_START@@@")
+        sys.stdout.flush()
 
     def start_monitoring(self):
-        print("\n[+] Real-Time Per-Second Resource Usage:")
-        print("{:<10} {:<8} {:<10} {:<50}".format("Time", "CPU%", "Mem(MB)", "Active Functions"))
+
+        print("DEBUG: Monitoring started")  # Add this
+        self.process.cpu_percent(interval=None)
 
         while not self.stop_event.is_set():
             if not self.process.is_running():
@@ -36,18 +42,22 @@ class FunctionProfiler:
                 with self.lock:
                     active_funcs = [f.split(':')[1] for f in self.call_stack] if self.call_stack else ['<main>']
                     log_entry = {
-                        'timestamp': datetime.fromtimestamp(timestamp).strftime('%H:%M:%S'),
-                        'cpu': cpu,
-                        'mem': mem,
-                        'active_functions': active_funcs
+                        'type': 'realtimeUpdate',
+                        'data': {
+                            'timestamp': datetime.fromtimestamp(timestamp).strftime('%H:%M:%S'),
+                            'cpu': cpu,
+                            'mem': mem,
+                            'functions': ", ".join(active_funcs) or "<main>"
+                        }
                     }
-                    self.per_second_log.append(log_entry)
+                    self.per_second_log.append(log_entry['data'])
                     self.last_second_logged = current_second
 
-                    # Real-time print here
-                    print("{:<10} {:<8.1f} {:<10.1f} {:<50}".format(
-                        log_entry['timestamp'], log_entry['cpu'], log_entry['mem'], ", ".join(log_entry['active_functions']) or "<main>"
-                    ))
+                    print("DEBUG: Sending data:", json.dumps(log_entry))  # Add this
+
+                    # Output as JSON for the extension to parse
+                    print(json.dumps(log_entry))
+                    sys.stdout.flush()
 
             with self.lock:
                 for func_info in self.call_stack:
@@ -155,25 +165,30 @@ def profile_script(script_path):
         profiler.stop_event.set()
         monitor_thread.join()
 
-    print("\n[+] Per-Second Resource Usage:")
-    print("{:<10} {:<8} {:<10} {:<50}".format("Time", "CPU%", "Mem(MB)", "Active Functions"))
-    for entry in profiler.per_second_log:
-        print("{:<10} {:<8.1f} {:<10.1f} {:<50}".format(
-            entry['timestamp'], entry['cpu'], entry['mem'], ", ".join(entry['active_functions']) or "<main>"
-        ))
-
-    print("\n[+] Function Statistics:")
-    print("{:<35} {:<8} {:<12} {:<10} {:<10} {:<10} {:<10}".format(
-        "Function", "Calls", "Total Time", "Avg CPU%", "Max CPU%", "Avg Mem", "Max Mem"
-    ))
-
+    # Send final data
     stats = profiler.get_aggregated_stats()
-    for func, data in sorted(stats.items(), key=lambda x: -x[1]['total_time']):
-        print("{:<35} {:<8} {:<12.3f} {:<10.1f} {:<10.1f} {:<10.1f} {:<10.1f}".format(
-            func, data['calls'], data['total_time'],
-            data['avg_cpu'], data['max_cpu'], data['avg_mem'], data['max_mem']
-        ))
-
+    final_data = {
+        'type': 'profilerData',
+        'data': {
+            'realTimeData': profiler.per_second_log,
+            'functionStats': [
+                {
+                    'function': func,
+                    'calls': data['calls'],
+                    'totalTime': data['total_time'],
+                    'avgCpu': data['avg_cpu'],
+                    'maxCpu': data['max_cpu'],
+                    'avgMem': data['avg_mem'],
+                    'maxMem': data['max_mem']
+                }
+                for func, data in sorted(stats.items(), key=lambda x: -x[1]['total_time'])
+            ]
+        }
+    }
+    print(json.dumps(final_data))
+    print("@@@PROFILER_END@@@")
+    sys.stdout.flush()
+    
 if __name__ == "__main__":
     if len(sys.argv) != 2:
         print("Usage: python universal_profiler.py <your_script.py>")

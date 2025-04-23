@@ -21,5 +21,10 @@
   "scripts": {
     "postinstall": "pip install -r profiler/requirements.txt"
   },
-  "dependencies": {}
+    "devDependencies": {
+    "@types/vscode": "^1.82.0"
+  },
+  "dependencies": {
+    "chart.js": "^3.7.1"
+  }
 }
